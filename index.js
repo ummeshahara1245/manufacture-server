@@ -72,9 +72,11 @@ async function run() {
     try {
         await client.connect()
         console.log('Database connected successfully')
-        const toolCollection = client.db('manufacturer_toolboxes').collection('tools');
-        const orderCollection = client.db('manufacturer_toolboxes').collection('orders');
-        const userCollection = client.db('manufacturer_toolboxes').collection('users');
+        const toolCollection = client.db('boomers').collection('tools');
+        const orderCollection = client.db('boomers').collection('orders');
+        const userCollection = client.db('boomers').collection('users');
+                const reviewCollection = client.db('boomers').collection('reviews');
+
 
         const verifyAdmin = async (req, res, next) => {
             const requester = req.decoded.email;
@@ -195,6 +197,11 @@ async function run() {
             const result = await orderCollection.deleteOne(filter);
             res.send(result);
         })
+        app.post('/reviews', verifyJWT, async (req, res) => {
+            const review = req.body;
+            const result = await reviewCollection.insertOne(review);
+            res.send(result)
+        })
         // app.get('/available', async (req, res) => {
         //     const tools = await toolCollection.find().toArray();
         //     res.send(tools)
@@ -211,9 +218,9 @@ app.use(cors());
 app.use(express.json())
 
 app.get('/', (req, res) => {
-    res.send(`Elite Toolboxes's server is running`)
+    res.send(`boomers server is running`)
 })
 
 app.listen(port, () => {
-    console.log(`Elite Toolboxes's listening on port ${port}`)
+    console.log(`boomers listening on port ${port}`)
 })
