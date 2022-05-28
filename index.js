@@ -8,7 +8,7 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.pjtoo.mongodb.net/?retryWrites=true&w=majority`;
 const nodemailer = require('nodemailer');
 const sgTransport = require('nodemailer-sendgrid-transport');
-const ObjectId = require('mongodb').ObjectId
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
@@ -46,13 +46,13 @@ function sendAppointmentEmail(order) {
         subject: `Your order for ${tool_name} has been confirmed`,
         text: `Your order for ${tool_name} has been confirmed`,
         html: `
-        <div style="background-image: url('https://i.ibb.co/nRYdY2n/attachment-90071703-removebg-preview.png');">
+        <div style="background-image: url('https://i.ibb.co/Q6nSX8P/logo.png');">
         <h1>Hello Mr/Mr.s ${name},</h1>
         <p>Your order for ${tool_name} ${quantity} pieces, at Date: ${date} has been confirmed. It will be shipped soon to your address. Please contact us for any queries</p>
         <h3>Our company address</h3>
         <p>Trunk road, Feni, Chittagong</p>
         <p>Bangladesh</p>
-        <a href="https://elite-toolboxes.web.app/">Don't want to here more from us? unsubscribe here.</a>
+        <a href="https://boomers-60ca3.web.app">Don't want to here more from us? unsubscribe here.</a>
         </div>
         `
     };
@@ -75,8 +75,8 @@ async function run() {
         const toolCollection = client.db('boomers').collection('tools');
         const orderCollection = client.db('boomers').collection('orders');
         const userCollection = client.db('boomers').collection('users');
-                const reviewCollection = client.db('boomers').collection('reviews');
-
+        const reviewCollection = client.db('boomers').collection('reviews');
+        const paymentCollection = client.db('boomers').collection('payments');
 
         const verifyAdmin = async (req, res, next) => {
             const requester = req.decoded.email;
@@ -85,14 +85,26 @@ async function run() {
                 next();
             }
         }
-
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
+            const tool = req.body;
+            const price = tool.price;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: "usd",
+                payment_method_types: ['card']
+            });
+            res.send({
+                clientSecret: paymentIntent.client_secret
+            })
+        })
         app.get('/tool', async (req, res) => {
             const query = {};
             const cursor = toolCollection.find(query);
             const tools = await cursor.toArray();
             res.send(tools);
         });
-        app.get('/tool/:id', async (req, res) => {
+        app.get('/tool/:id', verifyJWT, async (req, res) => {
             const id = req.params.id;
             const query = { _id: ObjectId(id) };
             const result = await toolCollection.findOne(query);
@@ -161,10 +173,21 @@ async function run() {
                 $set: user,
             };
             const result = await userCollection.updateOne(filter, updateDoc, options);
-            const token = jwt.sign({ email: email }, process.env.ACCCESS_TOKEN_SECRET, { expiresIn: '1h' })
+            const token = jwt.sign({ email: email }, process.env.ACCCESS_TOKEN_SECRET, { expiresIn: '10h' })
             res.send({ result, token });
         })
 
+        app.get('/user/:email', async (req, res) => {
+            const email = req.params.email;
+            const result = await userCollection.findOne({ email: email })
+            res.send(result);
+        })
+        app.get('/payment/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: ObjectId(id) };
+            const result = await paymentCollection.findOne(filter)
+            res.send(result);
+        })
 
         app.post('/order', async (req, res) => {
             const order = req.body;
@@ -173,6 +196,40 @@ async function run() {
             return res.send({ success: true, result });
 
         })
+        app.put('/order/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: ObjectId(id) };
+            const updateDoc = {
+                $set: { status: 'shipped' },
+            };
+            const result = await orderCollection.updateOne(filter, updateDoc);
+            res.send(result);
+
+        })
+        app.patch('/order/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            console.log(payment)
+            const filter = { _id: ObjectId(id) };
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    transactionId: payment.transactionId
+                }
+            }
+
+            const result = await paymentCollection.insertOne(payment);
+            const updatedOrder = await orderCollection.updateOne(filter, updatedDoc);
+            res.send(updatedOrder);
+        })
+
+        app.get('/order/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const order = await orderCollection.findOne(query);
+            res.send(order);
+        })
+
         app.get('/order', verifyJWT, async (req, res) => {
             const email = req.query.email;
             const decodedEmail = req.decoded.email;
@@ -197,7 +254,13 @@ async function run() {
             const result = await orderCollection.deleteOne(filter);
             res.send(result);
         })
-        app.post('/reviews', verifyJWT, async (req, res) => {
+        app.get('/reviews', async (req, res) => {
+            const query = {};
+            const cursor = reviewCollection.find(query);
+            const orders = await cursor.toArray();
+            res.send(orders);
+        });
+        app.post('/reviews', async (req, res) => {
             const review = req.body;
             const result = await reviewCollection.insertOne(review);
             res.send(result)
@@ -218,9 +281,9 @@ app.use(cors());
 app.use(express.json())
 
 app.get('/', (req, res) => {
-    res.send(`boomers server is running`)
+    res.send(`Boomers's server is running`)
 })
 
 app.listen(port, () => {
-    console.log(`boomers listening on port ${port}`)
+    console.log(`Boomers's listening on port ${port}`)
 })
